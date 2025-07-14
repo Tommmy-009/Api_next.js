@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: api-argo-famiglia-nextjs
+    env: docker                     # ✅ Usa il Dockerfile per il build
+    plan: free
+    dockerfilePath: ./Dockerfile   # ✅ Percorso del tuo Dockerfile
+    region: frankfurt              # Puoi cambiarlo se vuoi
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      # Aggiungi qui le variabili per scraping (se usi Supabase o login automatico)
+      # - key: CODICE_SCUOLA
+      #   value: xxx
+      # - key: USERNAME
+      #   value: xxx
+      # - key: PASSWORD
+      #   value: xxx
