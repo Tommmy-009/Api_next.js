@@ -1,25 +1,19 @@
 version: "3.9"
+
 services:
   api-next:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: api-next-1
+    container_name: api-next1
+    ports:
+      - "3001:3001"
     environment:
       NODE_ENV: "production"
       PORT: "3001"
-      # Playwright: se il tuo Dockerfile li gestisce già, queste possono non servire
-      # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      # PLAYWRIGHT_BROWSERS_PATH: "/usr/bin/chromium-browser"
-      # Credenziali (solo se non usi Supabase):
-      # CODICE_SCUOLA: "..."
-      # USERNAME: "..."
-      # PASSWORD: "..."
-    ports:
-      - "3001:3001"
     volumes:
-      - api-next-data:/app/data
+      - api_next_data:/app/data
     restart: unless-stopped
 
 volumes:
-  api-next-data1:
+  api_next_data:
