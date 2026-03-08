@@ -1,28 +1,25 @@
-FROM mcr.microsoft.com/playwright:v1.48.0-jammy
+# ─────────────────────────────────────────────────────────────────────────────
+# Dockerfile — UpNext FastAPI Backend
+# Usa l'immagine ufficiale Playwright per avere Chromium già disponibile
+# ─────────────────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/playwright/python:v1.43.0-jammy
 
 WORKDIR /app
 
-# Copia i file di dipendenze
-COPY package*.json ./
+# Copia prima i requirements per sfruttare il layer cache di Docker
+COPY backend/requirements.txt .
 
-# Installa solo le dipendenze (NO devDependencies)
-RUN npm install --production
+# Installa le dipendenze Python
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 🔥 INSTALLA I BROWSER DI PLAYWRIGHT
-RUN npx playwright install
+# Installa solo Chromium (già incluso nell'immagine base, questo lo aggiorna se serve)
+RUN playwright install chromium
 
-# Copia tutto il resto del progetto
-COPY . .
+# Copia il codice del backend
+COPY backend/ .
 
-# Crea il file DB se non esiste
-RUN mkdir -p /app && touch /app/promemoria.db
+EXPOSE 8000
 
-# Build dell'app Next.js
-RUN npm run build
+ENV PYTHONUNBUFFERED=1
 
-EXPOSE 3000
-
-ENV NODE_ENV=production
-ENV PORT=3000
-
-CMD ["npm", "start"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
