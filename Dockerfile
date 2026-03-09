@@ -1,25 +1,19 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Dockerfile — UpNext FastAPI Backend
-# Usa l'immagine ufficiale Playwright per avere Chromium già disponibile
-# ─────────────────────────────────────────────────────────────────────────────
 FROM mcr.microsoft.com/playwright/python:v1.43.0-jammy
 
-WORKDIR /app
+WORKDIR /app/backend
 
-# Copia prima i requirements per sfruttare il layer cache di Docker
-COPY backend/requirements.txt .
+# Runtime defaults for container logs and Python behavior
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
 
-# Installa le dipendenze Python
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies first for better Docker layer caching
+COPY backend/requirements.txt /tmp/requirements.txt
+RUN pip install -r /tmp/requirements.txt
 
-# Installa solo Chromium (già incluso nell'immagine base, questo lo aggiorna se serve)
-RUN playwright install chromium
+# Copy backend source code
+COPY backend/ /app/backend/
 
-# Copia il codice del backend
-COPY backend/ .
+EXPOSE 2367
 
-EXPOSE 8000
-
-ENV PYTHONUNBUFFERED=1
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "2367"]

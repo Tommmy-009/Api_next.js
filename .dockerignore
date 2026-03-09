@@ -1,0 +1,9 @@
+.git
+.gitignore
+README.md
+fly.toml
+
+backend/.venv
+backend/__pycache__
+backend/.pytest_cache
+backend/*.pyc
