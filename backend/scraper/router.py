@@ -108,15 +108,9 @@ def scrape_argo(
     """
     Richiede `Authorization: Bearer <access_token>`.
     Lo scrape viene sempre eseguito per l'utente autenticato.
-    Il `user_id` nel body è opzionale ed è accettato solo se coincide.
+    L'eventuale `user_id` nel body viene ignorato per evitare mismatch
+    dovuti a client legacy o sessioni locali non riallineate.
     """
-    # Sicurezza: lo scrape avviene sempre e solo per l'utente autenticato.
-    # Se un client legacy invia un user_id diverso, rifiutiamo la richiesta.
-    if body.user_id is not None and body.user_id != caller_user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Non puoi fare scrape per altri utenti",
-        )
     effective_user_id = caller_user_id
 
     # 1. Recupera credenziali Argo dal DB
