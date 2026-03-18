@@ -163,6 +163,11 @@ app.include_router(auth_router)
 app.include_router(promemoria_router, prefix="/promemoria", tags=["Promemoria"])
 app.include_router(argo_router,       prefix="/argo",       tags=["Argo Scraper"])
 
+# Compatibilita' retroattiva per i client che chiamano ancora /api/...
+app.include_router(auth_router, prefix="/api")
+app.include_router(promemoria_router, prefix="/api/promemoria", tags=["Promemoria"])
+app.include_router(argo_router, prefix="/api/argo", tags=["Argo Scraper"])
+
 
 @app.get("/health", tags=["Utility"])
 def health():
