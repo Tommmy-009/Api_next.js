@@ -107,15 +107,17 @@ def scrape_argo(
 ):
     """
     Richiede `Authorization: Bearer <access_token>`.
-    Il `user_id` nel body deve corrispondere all'utente autenticato
-    oppure l'utente può fare scrape solo per sé stesso.
+    Lo scrape viene sempre eseguito per l'utente autenticato.
+    Il `user_id` nel body è opzionale ed è accettato solo se coincide.
     """
-    # Sicurezza: consenti lo scrape solo per il proprio account
-    if body.user_id != caller_user_id:
+    # Sicurezza: lo scrape avviene sempre e solo per l'utente autenticato.
+    # Se un client legacy invia un user_id diverso, rifiutiamo la richiesta.
+    if body.user_id is not None and body.user_id != caller_user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Non puoi fare scrape per altri utenti",
         )
+    effective_user_id = caller_user_id
 
     # 1. Recupera credenziali Argo dal DB
     try:
@@ -128,7 +130,7 @@ def scrape_argo(
                     WHERE user_id = %s
                     LIMIT 1
                     """,
-                    (body.user_id,),
+                    (effective_user_id,),
                 )
                 cred = cur.fetchone()
     except (psycopg2.OperationalError, psycopg2.InterfaceError):
@@ -144,7 +146,7 @@ def scrape_argo(
         )
 
     # 2. Lancia lo scraper in un thread separato (Playwright è sync)
-    logger.info(f"Avvio scrape per user_id={body.user_id}")
+    logger.info(f"Avvio scrape per user_id={effective_user_id}")
     future = _executor.submit(
         estrai_promemoria_con_credenziali,
         cred["codice_scuola"],
@@ -176,7 +178,7 @@ def scrape_argo(
                 for r in risultati:
                     if DEBUG_SCRAPER:
                         print("SCRAPER DEBUG:")
-                        print(f"User: {body.user_id}")
+                        print(f"User: {effective_user_id}")
                         print(f"Date: {r['data']}")
                         print(f"Subject: {r['materia']}")
                         print(f"Description: {r['descrizione']}")
@@ -188,7 +190,7 @@ def scrape_argo(
                         VALUES (%s, %s, %s, %s)
                         ON CONFLICT DO NOTHING
                         """,
-                        (body.user_id, r["data"], r["materia"], r["descrizione"]),
+                        (effective_user_id, r["data"], r["materia"], r["descrizione"]),
                     )
                     if cur.rowcount == 1:
                         inserted_count += 1
@@ -206,7 +208,7 @@ def scrape_argo(
 
     logger.info(
         "Salvataggio scrape completato per user_id=%s: scraped=%d inserted=%d duplicates=%d",
-        body.user_id,
+        effective_user_id,
         scraped_count,
         inserted_count,
         duplicate_count,
@@ -218,6 +220,7 @@ def scrape_argo(
 
     return ScrapeResponse(
         promemoria=[PromemoriaItem(**r) for r in risultati],
+        result=[PromemoriaItem(**r) for r in risultati],
         count=inserted_count,
         scraped=scraped_count,
         inserted=inserted_count,

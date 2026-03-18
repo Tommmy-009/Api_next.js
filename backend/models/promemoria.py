@@ -23,11 +23,12 @@ class CalendarEvent(BaseModel):
 
 
 class ScrapeRequest(BaseModel):
-    user_id: str
+    user_id: Optional[str] = None
 
 
 class ScrapeResponse(BaseModel):
     promemoria: list[PromemoriaItem]
+    result: list[PromemoriaItem]
     count: int
     scraped: int
     inserted: int
