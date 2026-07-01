@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routes.auth_routes   import router as auth_router
 from promemoria.router    import router as promemoria_router
 from scraper.router       import router as argo_router
+from admin.router         import router as admin_router
 
 # ── Startup utilities ─────────────────────────────────────────────────────────
 from database.db import engine
@@ -162,6 +163,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(promemoria_router, prefix="/promemoria", tags=["Promemoria"])
 app.include_router(argo_router,       prefix="/argo",       tags=["Argo Scraper"])
+app.include_router(admin_router)
 
 # Compatibilita' retroattiva per i client che chiamano ancora /api/...
 app.include_router(auth_router, prefix="/api")

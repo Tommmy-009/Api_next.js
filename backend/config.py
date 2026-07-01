@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret_key: str
     argo_credentials_key: str | None = None
+    admin_dashboard_username: str | None = None
+    admin_dashboard_password: str | None = None
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 30

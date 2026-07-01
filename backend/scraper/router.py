@@ -5,8 +5,6 @@ salva i risultati in public.promemoria (replace) e li restituisce.
 """
 import logging
 import os
-import hashlib
-from base64 import urlsafe_b64encode
 from concurrent.futures import ThreadPoolExecutor
 import psycopg2
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,15 +12,17 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 
 from database_pool import get_db, get_cursor
-from config.settings import settings
 from auth.jwt_handler import get_user_id_from_token
-from scraper.argo import estrai_promemoria_con_credenziali
+from scraper.argo import estrai_docenti_con_credenziali, estrai_promemoria_con_credenziali
+from scraper.credentials_crypto import encrypt_argo_password, decrypt_argo_password
 from models.promemoria import ScrapeRequest, ScrapeResponse, PromemoriaItem
 from models.argo import (
     ArgoCredentialsConfiguredResponse,
     ArgoCredentialsDetailsResponse,
     ArgoCredentialsUpsertRequest,
     ArgoCredentialsUpsertResponse,
+    ArgoTeacherItem,
+    ArgoTeachersScrapeResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,46 +50,6 @@ def _get_user_id(credentials: HTTPAuthorizationCredentials = Depends(bearer_sche
             detail=str(exc),
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-
-def _get_argo_cipher():
-    try:
-        from cryptography.fernet import Fernet
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Cifratura credenziali Argo non disponibile lato server.",
-        ) from exc
-
-    secret = settings.argo_credentials_key or settings.jwt_secret_key
-    if not secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Configurazione server incompleta per cifratura credenziali Argo.",
-        )
-
-    key = urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
-    return Fernet(key)
-
-
-def _encrypt_argo_password(raw_password: str) -> str:
-    cipher = _get_argo_cipher()
-    return cipher.encrypt(raw_password.encode("utf-8")).decode("utf-8")
-
-
-def _decrypt_argo_password(stored_password: str) -> str:
-    cipher = _get_argo_cipher()
-    try:
-        return cipher.decrypt(stored_password.encode("utf-8")).decode("utf-8")
-    except Exception:
-        # Compatibilità retroattiva: credenziali legacy salvate in chiaro.
-        if stored_password.startswith("gAAAA"):
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Formato credenziali Argo non valido.",
-            )
-        return stored_password
-
 
 @router.post(
     "/scrape",
@@ -145,7 +105,7 @@ def scrape_argo(
         estrai_promemoria_con_credenziali,
         cred["codice_scuola"],
         cred["username"],
-        _decrypt_argo_password(cred["password"]),
+        decrypt_argo_password(cred["password"]),
     )
     try:
         risultati: list[dict] = future.result(timeout=120)  # max 2 minuti
@@ -224,6 +184,71 @@ def scrape_argo(
 
 
 @router.post(
+    "/teachers",
+    response_model=ArgoTeachersScrapeResponse,
+    summary="Scrape dei docenti Argo",
+    description=(
+        "Apre Servizi Classe, entra in Docenti Classe e legge l'elenco dei docenti."
+    ),
+)
+def scrape_argo_teachers(
+    body: ScrapeRequest,
+    caller_user_id: str = Depends(_get_user_id),
+):
+    try:
+        with get_db() as conn:
+            with get_cursor(conn) as cur:
+                cur.execute(
+                    """
+                    SELECT codice_scuola, username, password
+                    FROM public.argo_credentials
+                    WHERE user_id = %s
+                    LIMIT 1
+                    """,
+                    (caller_user_id,),
+                )
+                cred = cur.fetchone()
+    except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database temporaneamente non disponibile. Riprova tra poco.",
+        )
+
+    if not cred:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credenziali Argo non trovate. Usa POST /argo/credentials per salvarle.",
+        )
+
+    future = _executor.submit(
+        estrai_docenti_con_credenziali,
+        cred["codice_scuola"],
+        cred["username"],
+        decrypt_argo_password(cred["password"]),
+    )
+    try:
+        scraped_teachers: list[dict] = future.result(timeout=120)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Timeout durante lo scraping dei docenti Argo (>120s)",
+        )
+    except Exception as exc:
+        logger.error("Errore scraper docenti: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Errore durante lo scraping dei docenti: {exc}",
+        )
+
+    teachers = [ArgoTeacherItem(**teacher) for teacher in scraped_teachers]
+    return ArgoTeachersScrapeResponse(
+        teachers=teachers,
+        result=teachers,
+        count=len(teachers),
+    )
+
+
+@router.post(
     "/credentials",
     response_model=ArgoCredentialsUpsertResponse,
     status_code=status.HTTP_200_OK,
@@ -252,7 +277,7 @@ def save_argo_credentials(
                     user_id,
                     body.codice_scuola,
                     body.username,
-                    _encrypt_argo_password(body.password),
+                    encrypt_argo_password(body.password),
                 ),
             )
 

@@ -27,3 +27,14 @@ class ArgoCredentialsDetailsResponse(BaseModel):
     configured: bool
     codice_scuola: str | None = None
     username: str | None = None
+
+
+class ArgoTeacherItem(BaseModel):
+    name: str
+    subject: str | None = None
+
+
+class ArgoTeachersScrapeResponse(BaseModel):
+    teachers: list[ArgoTeacherItem]
+    result: list[ArgoTeacherItem]
+    count: int
