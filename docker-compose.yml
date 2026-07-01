@@ -4,16 +4,42 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
     env_file:
       - ./backend/.env
+
     ports:
       - "2367:2367"
+
     restart: unless-stopped
+
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+    depends_on:
+      - postgres-upnext
+
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2367/health', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  postgres-upnext:
+    image: postgres:16
+
+    container_name: postgres-upnext
+
+    restart: unless-stopped
+
+    environment:
+      POSTGRES_DB: upnext
+      POSTGRES_USER: upnext_user
+      POSTGRES_PASSWORD: 301278ETke!
+
+    volumes:
+      - postgres_upnext_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_upnext_data:

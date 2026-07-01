@@ -1,13 +1,17 @@
 """
-models/user.py — Modello SQLAlchemy per auth.users (read-only, schema Supabase)
+models/user.py — Modello SQLAlchemy users locale
              + Modelli Pydantic per request/response API
 """
+
 from sqlalchemy import Column, Text, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from database.db import Base
+
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
+
 from typing import Optional
 from datetime import datetime
+
 import uuid
 
 
@@ -15,17 +19,19 @@ import uuid
 
 class User(Base):
     """
-    Mappa la tabella auth.users esistente (schema Supabase).
-    Non modifica lo schema — solo lettura delle colonne usate dall'auth.
+    Modello users locale PostgreSQL.
+    Usa automaticamente lo schema public.
     """
+
     __tablename__ = "users"
-    __table_args__ = {"schema": "auth"}   # ← punta allo schema auth
 
     id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email              = Column(Text, unique=True, nullable=False, index=True)
     encrypted_password = Column(Text, nullable=True)
+
     created_at         = Column(DateTime(timezone=True), nullable=True)
     updated_at         = Column(DateTime(timezone=True), nullable=True)
+
     email_confirmed_at = Column(DateTime(timezone=True), nullable=True)
     last_sign_in_at    = Column(DateTime(timezone=True), nullable=True)
 
@@ -61,15 +67,16 @@ class RegisterRequest(BaseModel):
     def normalize_name(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
+
         name = v.strip()
         return name or None
 
 
 class TokenResponse(BaseModel):
-    access_token:  str
+    access_token: str
     refresh_token: str
-    token_type:    str = "bearer"
-    expires_in:    int   # secondi
+    token_type: str = "bearer"
+    expires_in: int
 
 
 class RefreshRequest(BaseModel):
@@ -78,8 +85,8 @@ class RefreshRequest(BaseModel):
 
 class RefreshResponse(BaseModel):
     access_token: str
-    token_type:   str = "bearer"
-    expires_in:   int
+    token_type: str = "bearer"
+    expires_in: int
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -95,6 +102,7 @@ class ResetPasswordRequest(BaseModel):
     def reset_password_not_empty(cls, v: str) -> str:
         if not v or not v.strip():
             raise ValueError("La password non può essere vuota")
+
         return v
 
 
@@ -108,6 +116,7 @@ class UpdateMeRequest(BaseModel):
     def update_name_not_blank(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
+
         name = v.strip()
         return name or None
 
@@ -116,14 +125,17 @@ class UpdateMeRequest(BaseModel):
     def update_password_not_empty(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
+
         if not v.strip():
             raise ValueError("La password non può essere vuota")
+
         return v
 
     @model_validator(mode="after")
     def at_least_one_field(self):
         if self.name is None and self.email is None and self.password is None:
             raise ValueError("Fornisci almeno un campo da aggiornare")
+
         return self
 
 
@@ -133,11 +145,15 @@ class GenericSuccessResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id:                 uuid.UUID
-    email:              str
-    name:               Optional[str] = None
-    created_at:         Optional[datetime] = None
-    email_confirmed_at: Optional[datetime] = None
-    last_sign_in_at:    Optional[datetime] = None
+    id: uuid.UUID
+    email: str
 
-    model_config = {"from_attributes": True}  # permette User ORM → Pydantic
+    name: Optional[str] = None
+
+    created_at: Optional[datetime] = None
+    email_confirmed_at: Optional[datetime] = None
+    last_sign_in_at: Optional[datetime] = None
+
+    model_config = {
+        "from_attributes": True
+    }
