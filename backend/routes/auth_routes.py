@@ -28,6 +28,7 @@ from auth.auth_service import (
     reset_password,
     logout_user,
     update_me,
+    delete_account,
 )
 from auth.jwt_handler import get_user_id_from_token
 
@@ -174,3 +175,18 @@ def patch_me(
     db: Session = Depends(get_db),
 ):
     return update_me(user_id, body, db)
+
+
+# ── DELETE /auth/me ──────────────────────────────────────────────────────────
+
+@router.delete(
+    "/me",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Elimina definitivamente l'account dell'utente autenticato",
+)
+def delete_me(
+    user_id: str = Depends(_get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    delete_account(user_id, db)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

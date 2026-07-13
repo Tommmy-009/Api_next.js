@@ -185,6 +185,26 @@ def logout_user(user_id: str, db: Session) -> None:
     db.commit()
 
 
+# ── Delete account ────────────────────────────────────────────────────────────
+
+def delete_account(user_id: str, db: Session) -> None:
+    user: User | None = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Utente non trovato",
+        )
+
+    _delete_user_rows("public.password_reset_tokens", user_id, db)
+    _delete_user_rows("public.refresh_token_state", user_id, db)
+    _delete_user_rows("public.user_profiles", user_id, db)
+    _delete_user_rows("public.argo_credentials", user_id, db)
+    _delete_user_rows("public.promemoria", user_id, db)
+
+    db.delete(user)
+    db.commit()
+
+
 # ── Password reset ────────────────────────────────────────────────────────────
 
 def forgot_password(email: str, db: Session) -> GenericSuccessResponse:
@@ -439,6 +459,23 @@ def _upsert_profile_name(user_id: str, name: str, db: Session) -> None:
             db.rollback()
             logger.warning(
                 "Scrittura public.user_profiles non disponibile (tabella assente o permessi insufficienti): aggiornamento nome disattivato"
+            )
+            return
+        raise
+
+
+def _delete_user_rows(table_name: str, user_id: str, db: Session) -> None:
+    try:
+        with db.begin_nested():
+            db.execute(
+                text(f"DELETE FROM {table_name} WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            )
+    except Exception as exc:
+        if _is_missing_relation(exc, table_name) or _is_permission_denied(exc):
+            logger.warning(
+                "Cancellazione %s non disponibile (tabella assente o permessi insufficienti): salto",
+                table_name,
             )
             return
         raise
