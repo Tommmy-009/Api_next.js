@@ -19,11 +19,12 @@ import uuid
 
 class User(Base):
     """
-    Modello users locale PostgreSQL.
-    Usa automaticamente lo schema public.
+    Modello utenti Supabase/PostgreSQL.
+    La tabella reale vive nello schema auth.
     """
 
     __tablename__ = "users"
+    __table_args__ = {"schema": "auth"}
 
     id                 = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email              = Column(Text, unique=True, nullable=False, index=True)
