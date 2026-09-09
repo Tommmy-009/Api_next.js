@@ -4,8 +4,11 @@ main.py — Entry point UpNext API v3 (struttura production)
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+from config.settings import settings
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 from routes.auth_routes import router as auth_router
@@ -17,7 +20,8 @@ from admin.router import router as admin_router
 from database.db import engine
 from database.db import Base  # noqa: F401 — needed for metadata
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, OperationalError as SQLAlchemyOperationalError
+import psycopg2
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +37,21 @@ def _ensure_tables():
     Crea le tabelle necessarie senza dipendere da Supabase/auth.users
     """
     with engine.connect() as conn:
+
+        # Docker Compose uses plain PostgreSQL rather than Supabase.  Create the
+        # minimal auth.users contract there; on Supabase this is a no-op.
+        conn.execute(text("CREATE SCHEMA IF NOT EXISTS auth"))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS auth.users (
+                id UUID PRIMARY KEY,
+                email TEXT UNIQUE NOT NULL,
+                encrypted_password TEXT,
+                created_at TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ,
+                email_confirmed_at TIMESTAMPTZ,
+                last_sign_in_at TIMESTAMPTZ
+            )
+        """))
 
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS public.promemoria (
@@ -162,6 +181,7 @@ async def lifespan(app: FastAPI):
     _ensure_tables()
     logger.info("🚀 UpNext API avviata")
     yield
+    engine.dispose()
     logger.info("UpNext API fermata")
 
 
@@ -179,11 +199,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+@app.exception_handler(psycopg2.OperationalError)
+@app.exception_handler(psycopg2.InterfaceError)
+async def postgres_unavailable(_: Request, exc: Exception):
+    logger.error("Database non disponibile: %s", type(exc).__name__)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database temporaneamente non disponibile. Riprova tra poco."},
+    )
+
+
+@app.exception_handler(SQLAlchemyOperationalError)
+async def sqlalchemy_unavailable(_: Request, exc: Exception):
+    logger.error("Database SQLAlchemy non disponibile: %s", type(exc).__name__)
+    return JSONResponse(
+        status_code=503,
+        content={"detail": "Database temporaneamente non disponibile. Riprova tra poco."},
+    )
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=cors_origins or ["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=False,
 )
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -225,7 +266,4 @@ app.include_router(admin_router, prefix="/api")
 
 @app.get("/health", tags=["Utility"])
 def health():
-    return {
-        "status": "ok",
-        "version": "3.0.0"
-    }
+    return {"status": "ok", "version": "3.0.0"}

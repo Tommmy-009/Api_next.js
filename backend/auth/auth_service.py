@@ -229,7 +229,7 @@ def forgot_password(email: str, db: Session) -> GenericSuccessResponse:
             },
         )
         db.commit()
-        logger.info("Password reset token for %s: %s", normalized_email, reset_token)
+        logger.info("Password reset requested for an existing account")
 
     return GenericSuccessResponse(message="Se l'email esiste, riceverai istruzioni per il reset")
 

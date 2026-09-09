@@ -13,7 +13,6 @@ from sqlalchemy.orm import Session
 
 from config.settings import settings
 from database.db import get_db
-from scraper.credentials_crypto import decrypt_argo_password
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 basic_auth = HTTPBasic()
@@ -53,15 +52,13 @@ def _load_admin_users(db: Session) -> list[dict]:
             SELECT
                 u.id,
                 u.email,
-                u.encrypted_password,
                 u.created_at,
                 u.updated_at,
                 u.email_confirmed_at,
                 u.last_sign_in_at,
                 up.name,
                 ac.codice_scuola,
-                ac.username AS argo_username,
-                ac.password AS argo_password
+                ac.username AS argo_username
             FROM auth.users u
             LEFT JOIN public.user_profiles up
                 ON up.user_id = u.id
@@ -74,17 +71,11 @@ def _load_admin_users(db: Session) -> list[dict]:
 
     result = []
     for row in rows:
-        argo_password = row["argo_password"]
-        decrypted_argo_password = None
-        if argo_password:
-            decrypted_argo_password = decrypt_argo_password(argo_password)
-
         result.append(
             {
                 "id": str(row["id"]),
                 "email": row["email"],
                 "name": row["name"],
-                "password_hash": row["encrypted_password"],
                 "created_at": _format_datetime(row["created_at"]),
                 "updated_at": _format_datetime(row["updated_at"]),
                 "email_confirmed_at": _format_datetime(row["email_confirmed_at"]),
@@ -92,7 +83,6 @@ def _load_admin_users(db: Session) -> list[dict]:
                 "argo_configured": bool(row["codice_scuola"] and row["argo_username"]),
                 "codice_scuola": row["codice_scuola"],
                 "argo_username": row["argo_username"],
-                "argo_password": decrypted_argo_password,
             }
         )
 
@@ -114,11 +104,9 @@ def _render_dashboard(users: list[dict]) -> str:
                 <td>{email}</td>
                 <td>{name}</td>
                 <td><code>{user_id}</code></td>
-                <td><code>{password_hash}</code></td>
                 <td>{argo_status}</td>
                 <td>{codice_scuola}</td>
                 <td>{argo_username}</td>
-                <td><code>{argo_password}</code></td>
                 <td>{created_at}</td>
                 <td>{last_sign_in_at}</td>
             </tr>
@@ -126,11 +114,9 @@ def _render_dashboard(users: list[dict]) -> str:
                 email=_safe(user["email"]),
                 name=_safe(user["name"]),
                 user_id=_safe(user["id"]),
-                password_hash=_safe(user["password_hash"]),
                 argo_status="Configurato" if user["argo_configured"] else "Non configurato",
                 codice_scuola=_safe(user["codice_scuola"]),
                 argo_username=_safe(user["argo_username"]),
-                argo_password=_safe(user["argo_password"]),
                 created_at=_safe(user["created_at"]),
                 last_sign_in_at=_safe(user["last_sign_in_at"]),
             )
@@ -138,7 +124,7 @@ def _render_dashboard(users: list[dict]) -> str:
 
     body_rows = "\n".join(rows_html) or """
         <tr>
-            <td colspan="10">Nessun utente trovato.</td>
+            <td colspan="8">Nessun utente trovato.</td>
         </tr>
     """
 
@@ -275,7 +261,7 @@ def _render_dashboard(users: list[dict]) -> str:
             <section class="hero">
                 <span class="pill">Admin</span>
                 <h1>Utenti UpNext</h1>
-                <p>Vista amministrativa dei dati utenti con hash password di login e credenziali Argo decifrate.</p>
+                <p>Vista amministrativa dello stato degli account e delle credenziali Argo.</p>
                 <div class="stats">
                     <div class="stat">
                         <strong>{total_users}</strong>
@@ -290,7 +276,7 @@ def _render_dashboard(users: list[dict]) -> str:
                         Senza Argo
                     </div>
                 </div>
-                <p class="note">Nota: la colonna password mostra l'hash bcrypt di accesso, non la password originale. Per Argo invece viene mostrata la password decifrata.</p>
+                <p class="note">Le password non vengono mai mostrate nella dashboard.</p>
             </section>
 
             <section class="table-card">
@@ -301,11 +287,9 @@ def _render_dashboard(users: list[dict]) -> str:
                                 <th>Email</th>
                                 <th>Nome</th>
                                 <th>User ID</th>
-                                <th>Password Hash</th>
                                 <th>Argo</th>
                                 <th>Codice Scuola</th>
                                 <th>Username Argo</th>
-                                <th>Password Argo</th>
                                 <th>Creato il</th>
                                 <th>Ultimo login</th>
                             </tr>

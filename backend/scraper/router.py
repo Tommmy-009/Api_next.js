@@ -16,6 +16,8 @@ from auth.jwt_handler import get_user_id_from_token
 from scraper.argo import estrai_docenti_con_credenziali, estrai_promemoria_con_credenziali
 from scraper.credentials_crypto import encrypt_argo_password, decrypt_argo_password
 from models.promemoria import ScrapeRequest, ScrapeResponse, PromemoriaItem
+from promemoria.router import invalidate_user_cache
+from config.settings import settings
 from models.argo import (
     ArgoCredentialsConfiguredResponse,
     ArgoCredentialsDetailsResponse,
@@ -27,7 +29,7 @@ from models.argo import (
 
 logger = logging.getLogger(__name__)
 
-DEBUG_SCRAPER = os.getenv("DEBUG_SCRAPER", "false").lower() == "true"
+DEBUG_SCRAPER = settings.debug_scraper
 router = APIRouter()
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -108,17 +110,17 @@ def scrape_argo(
         decrypt_argo_password(cred["password"]),
     )
     try:
-        risultati: list[dict] = future.result(timeout=120)  # max 2 minuti
+        risultati: list[dict] = future.result(timeout=settings.argo_scrape_timeout_seconds)
     except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Timeout durante lo scraping di Argo (>120s)",
+            detail=f"Timeout durante lo scraping di Argo (>{settings.argo_scrape_timeout_seconds}s)",
         )
-    except Exception as e:
-        logger.error(f"Errore scraper: {e}")
+    except Exception:
+        logger.exception("Errore inatteso durante lo scraping Argo")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Errore durante lo scraping: {str(e)}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Servizio Argo temporaneamente non disponibile. Riprova tra poco.",
         )
 
     # 3. Salva i risultati con protezione conflitti a livello DB
@@ -160,6 +162,7 @@ def scrape_argo(
             detail="Database temporaneamente non disponibile durante il salvataggio.",
         )
 
+    invalidate_user_cache(effective_user_id)
     logger.info(
         "Salvataggio scrape completato per user_id=%s: scraped=%d inserted=%d duplicates=%d",
         effective_user_id,
@@ -227,17 +230,17 @@ def scrape_argo_teachers(
         decrypt_argo_password(cred["password"]),
     )
     try:
-        scraped_teachers: list[dict] = future.result(timeout=120)
+        scraped_teachers: list[dict] = future.result(timeout=settings.argo_scrape_timeout_seconds)
     except TimeoutError:
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Timeout durante lo scraping dei docenti Argo (>120s)",
+            detail=f"Timeout durante lo scraping dei docenti Argo (>{settings.argo_scrape_timeout_seconds}s)",
         )
-    except Exception as exc:
-        logger.error("Errore scraper docenti: %s", exc)
+    except Exception:
+        logger.exception("Errore inatteso durante lo scraping dei docenti Argo")
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Errore durante lo scraping dei docenti: {exc}",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Servizio Argo temporaneamente non disponibile. Riprova tra poco.",
         )
 
     teachers = [ArgoTeacherItem(**teacher) for teacher in scraped_teachers]
@@ -386,14 +389,21 @@ def debug_verifiche(user_id: str = Depends(_get_user_id)):
         estrai_promemoria_con_credenziali,
         cred["codice_scuola"],
         cred["username"],
-        _decrypt_argo_password(cred["password"]),
+        decrypt_argo_password(cred["password"]),
     )
     try:
         scraped_tests = future.result(timeout=120)
     except TimeoutError:
-        raise HTTPException(status_code=504, detail="Timeout")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Timeout durante lo scraping di Argo (>{settings.argo_scrape_timeout_seconds}s)",
+        )
+    except Exception:
+        logger.exception("Errore inatteso nel debug scraping Argo")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Servizio Argo temporaneamente non disponibile. Riprova tra poco.",
+        )
 
     # 3. DB tests
     with get_db() as conn:

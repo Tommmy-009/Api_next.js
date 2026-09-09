@@ -1,346 +1,87 @@
-# API Argo Famiglia - Next.js
+# UpNext API
 
-API per estrarre i promemoria da Argo Famiglia, convertita da Python/Flask a Next.js.
+Backend FastAPI per autenticazione, promemoria e integrazione Argo Famiglia.
+Il codice eseguibile è in `backend/`; il vecchio client Next.js non fa parte di questo checkout.
 
-## Caratteristiche
-
-- ✅ API REST completa con tutti gli endpoint originali
-- ✅ Scraping automatico con Playwright
-- ✅ Database SQLite per la persistenza
-- ✅ Integrazione con Supabase per le credenziali
-- ✅ Eventi calendario formattati
-- ✅ Pronto per il deployment su Render
-- ✅ Containerizzato con Docker
-
-## Struttura del Progetto
-
-```
-├── lib/
-│   ├── db.js              # Gestione database SQLite
-│   ├── scraper.js         # Logica di scraping Playwright
-│   └── supabase.js        # Client Supabase
-├── pages/
-│   ├── api/
-│   │   ├── health.js      # Health check
-│   │   ├── index.js       # Root endpoint
-│   │   ├── promemoria.js  # Estrai promemoria principale
-│   │   ├── promemoria/
-│   │   │   ├── db.js      # Promemoria da database
-│   │   │   └── calendar.js # Eventi calendario
-│   │   └── argo/
-│   │       └── scrape.js  # Scraping con credenziali Supabase
-│   └── index.js           # Homepage con documentazione
-├── scripts/
-│   └── startup.js         # Script di inizializzazione
-├── Dockerfile             # Container Docker
-├── render.yaml            # Configurazione Render
-└── package.json           # Dipendenze Node.js
-```
-
-## Installazione Locale
-
-1. **Clona il repository**
+## Avvio locale
 
 ```bash
-git clone <repository-url>
-cd api-argo-famiglia-nextjs
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+cp .env.example .env
+# modifica DATABASE_URL, JWT_SECRET_KEY e ARGO_CREDENTIALS_KEY
+uvicorn main:app --host 0.0.0.0 --port 2367 --reload
 ```
 
-2. **Installa le dipendenze**
+Verifica:
 
 ```bash
-npm install
+curl http://localhost:2367/health
 ```
 
-3. **Installa i browser Playwright**
+## Docker Compose
+
+Imposta `POSTGRES_PASSWORD` nell'ambiente e avvia:
 
 ```bash
-npx playwright install chromium
+POSTGRES_PASSWORD='una-password-locale' docker compose up --build
 ```
 
-4. **Configura le variabili d'ambiente**
+Il servizio è disponibile su `http://localhost:2367`. Il database crea automaticamente il contratto minimo `auth.users` e le tabelle operative mancanti.
+
+## Autenticazione
 
 ```bash
-cp .env.example .env.local
-# Modifica .env.local con le tue credenziali
+curl -X POST http://localhost:2367/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"utente@example.com","password":"password-sicura","name":"Mario"}'
+
+curl -X POST http://localhost:2367/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"utente@example.com","password":"password-sicura"}'
 ```
 
-5. **Avvia in modalità sviluppo**
+Usa il valore `access_token` restituito dal login:
 
 ```bash
-npm run dev
+curl http://localhost:2367/auth/me \
+  -H 'Authorization: Bearer ACCESS_TOKEN'
 ```
 
-## Deployment su Render
+Sono disponibili anche `/auth/refresh`, `/auth/logout`, `PATCH /auth/me`, `DELETE /auth/me`, `/auth/forgot-password` e `/auth/reset-password`.
 
-### Metodo 1: Automatic Deploy (Raccomandato)
+## Argo
 
-1. **Connetti il repository GitHub a Render**
+Le credenziali sono sempre associate all’utente del JWT; eventuali `user_id` inviati dal client vengono ignorati.
 
-   - Vai su [Render Dashboard](https://dashboard.render.com/)
-   - Clicca "New" → "Web Service"
-   - Connetti il tuo repository GitHub
+```bash
+curl -X POST http://localhost:2367/argo/credentials \
+  -H 'Authorization: Bearer ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"codice_scuola":"SC123","username":"utente-argo","password":"password-argo"}'
 
-2. **Configura il servizio**
+curl -X POST http://localhost:2367/argo/scrape \
+  -H 'Authorization: Bearer ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
 
-   - **Name**: `api-argo-famiglia-nextjs`
-   - **Environment**: `Node`
-   - **Build Command**: `npm install && npm run build`
-   - **Start Command**: `npm start`
-   - **Plan**: Free (o il piano che preferisci)
-
-3. **Imposta le variabili d'ambiente**
-   Nel dashboard di Render, vai su "Environment" e aggiungi:
-
-   ```
-   NODE_ENV=production
-   PORT=3000
-   PLAYWRIGHT_BROWSERS_PATH=/usr/bin/chromium-browser
-   PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
-   ```
-
-   Se usi credenziali hardcoded (non raccomandato), aggiungi anche:
-
-   ```
-   CODICE_SCUOLA=your_school_code
-   USERNAME=your_username
-   PASSWORD=your_password
-   ```
-
-4. **Deploy**
-   - Clicca "Create Web Service"
-   - Render farà automaticamente il build e deploy
-
-### Metodo 2: Docker Deploy
-
-1. **Crea il servizio Docker su Render**
-
-   - Scegli "Docker" come environment
-   - **Dockerfile Path**: `./Dockerfile`
-   - **Docker Build Context**: `./`
-
-2. **Stesse variabili d'ambiente del metodo 1**
-
-### Metodo 3: Manual Deploy con render.yaml
-
-1. **Usa il file render.yaml**
-   Il file `render.yaml` nella root contiene già tutta la configurazione
-
-2. **Connetti e deploy**
-   Render rileverà automaticamente il file e configurerà il servizio
-
-## Endpoints API
-
-### GET /api/health
-
-Health check del servizio
-
-```json
-{
-  "status": "ok",
-  "timestamp": "2024-01-01T12:00:00.000Z"
-}
+curl -X POST http://localhost:2367/argo/teachers \
+  -H 'Authorization: Bearer ACCESS_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{}'
 ```
 
-### GET /api/promemoria
+Altri endpoint: `GET/DELETE /argo/credentials`, `GET /argo/credentials/details` e `GET /argo/debug/verifiche`. Le password Argo sono cifrate a riposo e non vengono mai restituite dalle API o dalla dashboard admin.
 
-Estrai promemoria da Argo (richiede credenziali in env)
+## Promemoria e compatibilità
 
-```json
-{
-  "status": "success",
-  "data": {
-    "promemoria": [...],
-    "message": "Promemoria salvati nel database"
-  }
-}
-```
+- `GET /promemoria`
+- `GET /promemoria/calendar`
+- tutte le rotte principali sono disponibili anche con prefisso legacy `/api`;
+- `GET /admin/users` e `/admin/users.json` usano Basic Auth configurata tramite variabili ambiente;
+- le risposte usano `401`, `404`, `422`, `503` e `504` per i casi previsti.
 
-### GET /api/promemoria/db
-
-Ottieni promemoria dal database locale
-
-```json
-{
-  "status": "success",
-  "data": [
-    {
-      "data": "01/01/2024",
-      "materia": "Matematica",
-      "descrizione": "Compito in classe"
-    }
-  ]
-}
-```
-
-### GET /api/promemoria/calendar
-
-Ottieni eventi formattati per calendario
-
-```json
-{
-  "status": "success",
-  "data": [
-    {
-      "id": "promemoria_Matematica_20240101",
-      "title": "Verifica: Matematica",
-      "description": "Compito in classe",
-      "start": "2024-01-01T00:00:00.000Z",
-      "end": "2024-01-01T00:00:00.000Z",
-      "color": "#FF5733",
-      "allDay": true
-    }
-  ]
-}
-```
-
-### POST /api/argo/scrape
-
-Scraping con credenziali da Supabase
-
-```json
-// Request
-{
-  "user_id": "user123"
-}
-
-// Response
-{
-  "result": [
-    {
-      "data": "01/01/2024",
-      "materia": "Matematica",
-      "descrizione": "Compito in classe"
-    }
-  ]
-}
-```
-
-## Integrazione con Swift
-
-### Esempio di chiamata da Swift
-
-```swift
-import Foundation
-
-class ArgoAPI {
-    static let shared = ArgoAPI()
-    private let baseURL = "https://your-render-app.onrender.com"
-
-    func getPromemoria() async throws -> [Promemoria] {
-        guard let url = URL(string: "\(baseURL)/api/promemoria/db") else {
-            throw URLError(.badURL)
-        }
-
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(PromemoriaResponse.self, from: data)
-
-        if response.status == "success" {
-            return response.data
-        } else {
-            throw APIError.serverError(response.message ?? "Unknown error")
-        }
-    }
-
-    func scrapeWithCredentials(userId: String) async throws -> [Promemoria] {
-        guard let url = URL(string: "\(baseURL)/api/argo/scrape") else {
-            throw URLError(.badURL)
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-
-        let requestBody = ["user_id": userId]
-        request.httpBody = try JSONEncoder().encode(requestBody)
-
-        let (data, _) = try await URLSession.shared.data(for: request)
-        let response = try JSONDecoder().decode(ScrapeResponse.self, from: data)
-
-        return response.result
-    }
-}
-
-struct Promemoria: Codable {
-    let data: String
-    let materia: String
-    let descrizione: String
-}
-
-struct PromemoriaResponse: Codable {
-    let status: String
-    let data: [Promemoria]
-    let message: String?
-}
-
-struct ScrapeResponse: Codable {
-    let result: [Promemoria]
-}
-
-enum APIError: Error {
-    case serverError(String)
-}
-```
-
-## Configurazione Supabase
-
-Per usare l'endpoint `/api/argo/scrape`, assicurati di avere una tabella `argo_credentials` in Supabase:
-
-```sql
-CREATE TABLE argo_credentials (
-    id SERIAL PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    codice_scuola TEXT NOT NULL,
-    username TEXT NOT NULL,
-    password TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT NOW()
-);
-```
-
-## Monitoraggio e Logging
-
-- I log sono visibili nel dashboard di Render
-- Gli screenshot di debug vengono salvati in caso di errore
-- Health check disponibile su `/api/health`
-
-## Troubleshooting
-
-### Errori comuni su Render:
-
-1. **Playwright non trova il browser**
-
-   - Assicurati che `PLAYWRIGHT_BROWSERS_PATH` sia impostato
-   - Usa il Dockerfile per installazioni più robuste
-
-2. **Database non inizializzato**
-
-   - Il database SQLite viene creato automaticamente
-   - I file persistono tra i riavvii su Render
-
-3. **Timeout durante lo scraping**
-   - Render Free ha timeout di 30 secondi per le richieste
-   - Considera l'upgrade a un piano pagato per timeout più lunghi
-
-## Sicurezza
-
-- Le credenziali sono gestite tramite variabili d'ambiente
-- L'integrazione Supabase permette credenziali per utente
-- SSL/TLS automatico su Render
-- Rate limiting configurabile
-
-## Performance
-
-- Next.js API Routes ottimizzate
-- Database SQLite leggero
-- Caching automatico di Next.js
-- Supporto per multiple istanze su Render
-
-## Contribuire
-
-1. Fork il repository
-2. Crea un branch per la tua feature
-3. Commit le modifiche
-4. Push al branch
-5. Apri una Pull Request
-# Myplanck_api_next
-# Api_next.js
+La guida dettagliata è in [`BACKEND_INTEGRATION_GUIDE.md`](BACKEND_INTEGRATION_GUIDE.md).

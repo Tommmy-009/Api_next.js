@@ -20,7 +20,7 @@ Il backend offre:
 1. Posizionati nella cartella `backend`:
 
 ```bash
-cd /Users/tommasobrugnera/Developer/UPNEXT\ CON\ BACKEND/Api_next.js/backend
+cd /Users/tommasobrugnera/Developer/UP_Next_api/backend
 ```
 
 2. Crea l'ambiente virtuale e installa le dipendenze:

@@ -3,20 +3,33 @@ scraper/argo.py — Scraper Argo con Playwright
 Versione robusta con debug screenshot/html
 """
 
-import os
 import logging
+
+from config.settings import settings
 
 from playwright.sync_api import sync_playwright, Page, Browser
 
 logger = logging.getLogger(__name__)
 
-DEBUG_SCRAPER = os.getenv("DEBUG_SCRAPER", "false").lower() == "true"
+DEBUG_SCRAPER = settings.debug_scraper
 
 ARGO_BASE_URL = "https://www.portaleargo.it/argoweb/famiglia/"
 
 
 def _normalize_text(value: str | None) -> str:
     return " ".join((value or "").split())
+
+
+def _fill_first_available(page: Page, selectors: list[str], value: str, timeout: int = 5000) -> bool:
+    for selector in selectors:
+        try:
+            locator = page.locator(selector).first
+            locator.wait_for(state="visible", timeout=timeout)
+            locator.fill(value)
+            return True
+        except Exception:
+            continue
+    return False
 
 
 def _click_first_available(page: Page, selectors: list[str], timeout: int = 5000) -> bool:
@@ -116,7 +129,7 @@ def _parse_promemoria_table(page: Page) -> list[dict]:
     return promemoria
 
 
-def _parse_teachers_table(page: Page) -> list[dict]:
+def _parse_teachers_page(page: Page) -> list[dict]:
     """Estrae i docenti della classe dalla vista Argo."""
 
     teachers: list[dict] = []
@@ -266,6 +279,43 @@ def _parse_teachers_table(page: Page) -> list[dict]:
     return teachers
 
 
+def _click_next_teachers_page(page: Page) -> bool:
+    return _click_first_available(
+        page,
+        [
+            'button[aria-label*="next" i]',
+            'a[aria-label*="next" i]',
+            'button[title*="successiva" i]',
+            'a[title*="successiva" i]',
+            '.btl-paginator-next',
+        ],
+        timeout=1500,
+    )
+
+
+def _parse_teachers_table(page: Page) -> list[dict]:
+    """Parse all teacher pages, deduplicating records across pagination."""
+    teachers: list[dict] = []
+    seen: set[tuple[str, str | None]] = set()
+
+    for _ in range(20):
+        for teacher in _parse_teachers_page(page):
+            key = (
+                teacher["name"].casefold(),
+                teacher["subject"].casefold() if teacher.get("subject") else None,
+            )
+            if key not in seen:
+                seen.add(key)
+                teachers.append(teacher)
+
+        if not _click_next_teachers_page(page):
+            break
+        page.wait_for_timeout(500)
+
+    logger.info("Estratti %d docenti complessivi", len(teachers))
+    return teachers
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Login
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,7 +331,7 @@ def _do_login(
 
         logger.info("Navigando alla pagina di login Argo...")
 
-        page.goto(ARGO_BASE_URL)
+        page.goto(ARGO_BASE_URL, wait_until="domcontentloaded", timeout=30000)
 
         page.wait_for_load_state(
             "domcontentloaded",
@@ -290,22 +340,37 @@ def _do_login(
 
         logger.info("Compilando il form di login...")
 
-        page.fill(
-            'input[name="famiglia_customer_code"]',
-            codice_scuola
-        )
-
-        page.fill(
-            'input[name="username"]',
-            username
-        )
-
-        page.fill(
-            'input[name="password"]',
-            password
-        )
-
-        page.click("button#accediBtn")
+        if not _fill_first_available(
+            page,
+            ['input[name="famiglia_customer_code"]', 'input[name="codice_scuola"]', 'input[id*="customer" i]'],
+            codice_scuola,
+            timeout=10000,
+        ):
+            logger.error("Campo codice scuola Argo non trovato")
+            return False
+        if not _fill_first_available(
+            page,
+            ['input[name="username"]', 'input[name="user"]', 'input[id*="user" i]'],
+            username,
+            timeout=10000,
+        ):
+            logger.error("Campo username Argo non trovato")
+            return False
+        if not _fill_first_available(
+            page,
+            ['input[name="password"]', 'input[type="password"]'],
+            password,
+            timeout=10000,
+        ):
+            logger.error("Campo password Argo non trovato")
+            return False
+        if not _click_first_available(
+            page,
+            ['button#accediBtn', 'button[type="submit"]', 'input[type="submit"]'],
+            timeout=10000,
+        ):
+            logger.error("Pulsante accesso Argo non trovato")
+            return False
 
         page.wait_for_load_state(
             "domcontentloaded",
@@ -314,8 +379,8 @@ def _do_login(
 
         page.wait_for_timeout(3000)
 
-        if page.url == ARGO_BASE_URL:
-            logger.error("Login fallito")
+        if page.url.rstrip("/") == ARGO_BASE_URL.rstrip("/"):
+            logger.error("Login Argo fallito")
             return False
 
         logger.info(f"Login OK — URL corrente: {page.url}")
@@ -400,6 +465,19 @@ def _navigate_to_teachers(page: Page) -> bool:
             page.wait_for_url("**#/main/condivisione/**", timeout=10000)
         except Exception:
             pass
+
+        # Alcune versioni mostrano un secondo link interno invece di aprire
+        # direttamente la griglia Docenti Classe.
+        _click_first_available(
+            page,
+            [
+                'a[href*="docentiClasse"]',
+                'a:has-text("Docenti Classe")',
+                'button:has-text("Docenti Classe")',
+            ],
+            timeout=3000,
+        )
+        page.wait_for_timeout(1000)
 
         data_selectors = [
             'div.btl-listGrid[id*="docentiClasse"]',

@@ -109,7 +109,7 @@ La tabella `auth.users` non viene creata automaticamente: deve gia' esistere.
 
 ## Avvio locale
 
-Da `Api_next.js/backend`:
+Dalla cartella `backend/` del repository:
 
 ```bash
 python -m venv .venv
@@ -143,7 +143,7 @@ python check.py
 
 ## Avvio con Docker
 
-Da `Api_next.js`:
+Dalla root del repository:
 
 ```bash
 docker compose up --build
@@ -663,7 +663,7 @@ ADMIN_DASHBOARD_USERNAME=...
 ADMIN_DASHBOARD_PASSWORD=...
 ```
 
-Non abilitarla pubblicamente senza credenziali robuste. La dashboard mostra anche dati sensibili, incluse credenziali Argo decifrate.
+Non abilitarla pubblicamente senza credenziali robuste. La dashboard mostra solo metadati e stato delle credenziali; password e hash non vengono esposti.
 
 ## Checklist produzione
 

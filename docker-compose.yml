@@ -17,7 +17,8 @@ services:
       - "host.docker.internal:host-gateway"
 
     depends_on:
-      - postgres-upnext
+      postgres-upnext:
+        condition: service_healthy
 
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2367/health', timeout=4)"]
@@ -36,10 +37,16 @@ services:
     environment:
       POSTGRES_DB: upnext
       POSTGRES_USER: upnext_user
-      POSTGRES_PASSWORD: 301278ETke!
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or backend/.env}
 
     volumes:
       - postgres_upnext_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U upnext_user -d upnext"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
 volumes:
   postgres_upnext_data:

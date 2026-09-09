@@ -19,6 +19,13 @@ router = APIRouter()
 # Cache TTL: 5 minuti per le letture dal DB
 _cache: TTLCache = TTLCache(maxsize=128, ttl=300)
 
+
+def invalidate_user_cache(user_id: str) -> None:
+    """Invalidates both views after a scrape changes persisted reminders."""
+    _cache.pop(f"promemoria:{user_id}", None)
+    _cache.pop(f"calendar:{user_id}", None)
+
+
 bearer_scheme = HTTPBearer()
 
 

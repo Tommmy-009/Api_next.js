@@ -1,17 +1,16 @@
-fastapi==0.110.0
-uvicorn[standard]==0.27.1
-sqlalchemy==2.0.29
-psycopg2-binary==2.9.9
-python-jose[cryptography]==3.3.0
-cryptography==42.0.5
-bcrypt==4.1.2
-passlib[bcrypt]==1.7.4
-pydantic==2.6.3
-pydantic-settings==2.2.1
-email-validator==2.1.1
-python-dotenv==1.0.1
-python-multipart==0.0.9
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+sqlalchemy==2.0.52
+psycopg2-binary==2.9.12
+python-jose[cryptography]==3.5.0
+cryptography==50.0.1
+bcrypt==5.0.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+email-validator==2.3.0
+python-dotenv==1.2.3
+python-multipart==0.0.32
 # Scraper
-playwright==1.43.0
+playwright==1.62.0
 # Cache in-memory con TTL
-cachetools==5.3.3
+cachetools==7.1.8

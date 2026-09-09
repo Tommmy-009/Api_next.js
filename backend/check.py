@@ -8,7 +8,7 @@ Verifica:
   3. Lettura tabella auth.users
 """
 import sys
-import traceback
+from urllib.parse import urlsplit, urlunsplit
 
 
 def step(n: int, desc: str):
@@ -36,7 +36,9 @@ step(1, "Lettura .env e dipendenze Python")
 try:
     from config.settings import settings
     ok(f"Config caricata")
-    ok(f"DATABASE_URL = {settings.database_url[:40]}...")
+    parsed = urlsplit(settings.database_url)
+    safe_host = urlunsplit((parsed.scheme, parsed.hostname or "", parsed.path, "", ""))
+    ok(f"DATABASE_URL host = {safe_host}")
     ok(f"JWT_SECRET_KEY presente: {'sì' if settings.jwt_secret_key else 'NO ← problema!'}")
 except Exception as e:
     fail("Impossibile caricare config.py / .env", e)

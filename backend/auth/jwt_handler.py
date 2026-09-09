@@ -3,6 +3,7 @@ auth/jwt_handler.py — Creazione e decodifica di JWT (access + refresh token)
 """
 from datetime import datetime, timedelta, timezone
 from typing import Literal
+from uuid import UUID
 
 from jose import JWTError, jwt
 
@@ -94,4 +95,7 @@ def get_user_id_from_token(token: str, expected_type: TokenType = "access") -> s
     user_id: str | None = payload.get("sub")
     if not user_id:
         raise JWTError("Token missing 'sub' claim")
-    return user_id
+    try:
+        return str(UUID(user_id))
+    except (ValueError, AttributeError, TypeError) as exc:
+        raise JWTError("Token subject non valido") from exc
