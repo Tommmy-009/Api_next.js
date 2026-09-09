@@ -157,6 +157,37 @@ def _parse_teachers_page(page: Page) -> list[dict]:
         seen.add(key)
         teachers.append(item)
 
+    # Portale Argo attuale: pagina Vue/Vuetify con una card per docente.
+    # Esempio: .v-card contiene .text-subtitle-1 (nome) e un .text-caption
+    # che inizia con "Materia:" o "Materie:".
+    vuetify_cards = page.locator("div.v-card").all()
+    logger.info(f"Trovate {len(vuetify_cards)} card docenti nella pagina Vue")
+
+    for card in vuetify_cards:
+        try:
+            name = card.locator(".text-subtitle-1.font-weight-bold").first.inner_text(
+                timeout=2000
+            )
+        except Exception:
+            continue
+
+        subject = None
+        try:
+            for caption in card.locator(".text-caption").all():
+                text = _normalize_text(caption.inner_text())
+                lowered = text.casefold()
+                if lowered.startswith("materia:") or lowered.startswith("materie:"):
+                    subject = text.split(":", 1)[1].strip()
+                    break
+        except Exception:
+            pass
+
+        add_teacher(name, subject)
+
+    if teachers:
+        logger.info(f"Estratti {len(teachers)} docenti dalle card Vue")
+        return teachers
+
     # Struttura moderna Argo: griglia docentiClasse con celle nominativo/materie.
     modern_rows = page.locator(
         'div.btl-listGrid[id*="docentiClasse"] '
