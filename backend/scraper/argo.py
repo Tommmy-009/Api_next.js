@@ -1,10 +1,10 @@
 """
-scraper/argo.py — Port Python del lib/scraper.js originale
-Usa Playwright sync API per fare scraping su portaleargo.it
+scraper/argo.py — Scraper Argo con Playwright
+Versione robusta con debug screenshot/html
 """
+
 import os
 import logging
-from typing import Optional
 
 from playwright.sync_api import sync_playwright, Page, Browser
 
@@ -15,341 +15,476 @@ DEBUG_SCRAPER = os.getenv("DEBUG_SCRAPER", "false").lower() == "true"
 ARGO_BASE_URL = "https://www.portaleargo.it/argoweb/famiglia/"
 
 
-def _parse_promemoria_table(page: Page) -> list[dict]:
-    """Estrae e filtra le righe dalla tabella dei promemoria."""
-    promemoria = []
-
-    if DEBUG_SCRAPER:
-        try:
-            table_locator = page.locator("table, div.btl-table").first
-            print("SCRAPER HTML:\n" + table_locator.inner_html())
-        except Exception as e:
-            print(f"SCRAPER HTML ERROR: {e}")
-
-    # Trova le righe con diversi selettori (stesso approccio del JS originale)
-    rows = page.locator("table tr, div.btl-table tr").all()
-    
-    if DEBUG_SCRAPER:
-        print(f"SCRAPER DEBUG:\nRows found: {len(rows)}")
-    logger.info(f"Trovate {len(rows)} righe nella tabella")
-
-    for i, row in enumerate(rows[1:], start=1):  # Salta header
-        cells = row.locator("td").all()
-        if len(cells) < 3:
-            continue
-
-        data = cells[0].inner_text().strip()
-        materia = cells[1].inner_text().strip()
-        descrizione = cells[2].inner_text().strip()
-
-        # Filtri: stessa logica del JS
-        if not any([data, materia, descrizione]):
-            continue
-        if (
-            data.startswith("Alunno:")
-            or data.startswith("Classe:")
-            or "Informiamo gli utenti" in data
-        ):
-            continue
-
-        if DEBUG_SCRAPER:
-            print(f"Parsed test:\ndate={data}\nsubject={materia}\ndescription={descrizione}")
-
-        promemoria.append(
-            {"data": data, "materia": materia, "descrizione": descrizione}
-        )
-
-    if DEBUG_SCRAPER:
-        print("SCRAPER DEBUG:\nParsed tests:")
-        for p in promemoria:
-            print(f"- {p['data']} {p['materia']}")
-
-    logger.info(f"Estratti {len(promemoria)} promemoria validi")
-    return promemoria
+def _normalize_text(value: str | None) -> str:
+    return " ".join((value or "").split())
 
 
-def _navigate_to_promemoria(page: Page) -> bool:
-    """
-    Naviga alla sezione Promemoria per Classe.
-    Restituisce True se la tabella è stata trovata.
-    """
-    accordion_selector = 'div.btl-accordionItem[title="Servizi Classe"]'
-    accordion_head = 'div.btl-accordionItem-head[aria-label="Servizi Classe"]'
-    promemoria_btn = 'span.btl-button[title="Promemoria per Classe"]'
-
-    try:
-        page.wait_for_selector(accordion_selector, timeout=5000)
-        page.click(accordion_head)
-        page.wait_for_timeout(800)
-
-        page.wait_for_selector(promemoria_btn, timeout=3000)
-        page.click(promemoria_btn)
-        page.wait_for_timeout(1000)
-
-        # Cerca la tabella con diversi selettori
-        table_selectors = [
-            "table.btl-table",
-            "table",
-            "div[class*='table']",
-            "div.btl-table",
-        ]
-
-        if DEBUG_SCRAPER:
-            print("SCRAPER DEBUG:\nWaiting for table selector...")
-        try:
-            page.wait_for_selector("table", timeout=5000)
-        except Exception:
-            pass
-        for sel in table_selectors:
-            try:
-                page.wait_for_selector(sel, timeout=2000)
-                logger.info(f"Tabella trovata con selettore: {sel}")
-                return True
-            except Exception:
-                continue
-
-        logger.warning("Nessun selettore della tabella ha funzionato")
-        return False
-
-    except Exception as e:
-        logger.error(f"Errore nell'espansione del menu: {e}")
-        return False
-
-
-def _click_first_visible(page: Page, selectors: list[str], timeout: int = 3000) -> bool:
-    """Clicca il primo selettore visibile, evitando dipendenze da un solo markup Argo."""
+def _click_first_available(page: Page, selectors: list[str], timeout: int = 5000) -> bool:
     for selector in selectors:
         try:
             locator = page.locator(selector).first
             locator.wait_for(state="visible", timeout=timeout)
             locator.click()
+            logger.info(f"Click eseguito con selettore: {selector}")
             return True
         except Exception:
             continue
+
     return False
 
 
-def _navigate_to_teachers(page: Page) -> bool:
-    """Apre Servizi Classe → Docenti Classe."""
-    try:
-        if not _click_first_visible(
-            page,
-            [
-                'div.btl-accordionItem-head[aria-label="Servizi Classe"]',
-                'div.btl-accordionItem[title="Servizi Classe"] .btl-accordionItem-head',
-                '[aria-label="Servizi Classe"]',
-            ],
-            timeout=5000,
-        ):
-            logger.warning("Menu Servizi Classe non trovato")
-            return False
-
-        page.wait_for_timeout(500)
-        if not _click_first_visible(
-            page,
-            [
-                '#menu-serviziclasse\\:docenti-classe-famiglia',
-                'span.btl-button[title="Docenti Classe"]',
-                '[aria-label="Docenti Classe"][role="button"]',
-                '[title="Docenti Classe"]',
-                'text="Docenti Classe"',
-            ],
-            timeout=5000,
-        ):
-            logger.warning("Voce Docenti Classe non trovata")
-            return False
-
-        page.wait_for_timeout(1000)
+def _wait_for_any_selector(page: Page, selectors: list[str], timeout: int = 5000) -> bool:
+    for selector in selectors:
         try:
-            # La griglia Argo separa intestazioni e dati in due tabelle: attendiamo
-            # una riga docente reale, non una qualsiasi tabella già presente.
-            page.wait_for_selector(
-                'div.btl-listGrid[id*="docentiClasse"] '
-                '.btl-grid-dataViewContainer span[id$=":nominativo"]',
-                timeout=5000,
-            )
+            page.wait_for_selector(selector, timeout=timeout)
+            logger.info(f"Dati trovati con selettore: {selector}")
+            return True
         except Exception:
-            # Fallback per eventuali versioni di Argo con una tabella tradizionale.
-            page.wait_for_selector("table, div.btl-table", timeout=5000)
-        return True
-    except Exception as exc:
-        logger.error("Errore durante la navigazione ai docenti: %s", exc)
-        return False
+            continue
+
+    return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Helpers debug
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _save_debug(page: Page):
+    """Salva screenshot + html per debug."""
+    if not DEBUG_SCRAPER:
+        return
+
+    try:
+        page.screenshot(path="/app/backend/debug.png", full_page=True)
+
+        with open("/app/backend/debug.html", "w", encoding="utf-8") as f:
+            f.write(page.content())
+
+        logger.info("Debug HTML + screenshot salvati")
+
+    except Exception as e:
+        logger.error(f"Errore salvataggio debug: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Parsing tabella
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_promemoria_table(page: Page) -> list[dict]:
+    """Estrae le verifiche/promemoria dalla tabella."""
+
+    promemoria = []
+
+    rows = page.locator("table tr").all()
+
+    logger.info(f"Trovate {len(rows)} righe")
+
+    for row in rows[1:]:
+
+        cells = row.locator("td").all()
+
+        if len(cells) < 3:
+            continue
+
+        try:
+            data = cells[0].inner_text().strip()
+            materia = cells[1].inner_text().strip()
+            descrizione = cells[2].inner_text().strip()
+
+        except Exception:
+            continue
+
+        # Filtri anti-rumore
+        if not any([data, materia, descrizione]):
+            continue
+
+        if (
+            "Alunno:" in data
+            or "Classe:" in data
+            or "Informiamo gli utenti" in data
+        ):
+            continue
+
+        promemoria.append({
+            "data": data,
+            "materia": materia,
+            "descrizione": descrizione,
+        })
+
+    logger.info(f"Estratti {len(promemoria)} promemoria")
+
+    return promemoria
 
 
 def _parse_teachers_table(page: Page) -> list[dict]:
-    """Estrae nome e materia dalla pagina Docenti Classe."""
-    teachers: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    """Estrae i docenti della classe dalla vista Argo."""
 
-    # Argo attuale usa una btl-listGrid: intestazioni e dati sono in tabelle
-    # separate, mentre nome e materie hanno id con suffissi stabili.
-    argo_rows = page.locator(
+    teachers: list[dict] = []
+    seen: set[tuple[str, str | None]] = set()
+
+    def add_teacher(name: str, subject: str | None = None):
+        normalized_name = _normalize_text(name)
+        normalized_subject = _normalize_text(subject)
+
+        if not normalized_name:
+            return
+
+        item = {
+            "name": normalized_name,
+            "subject": normalized_subject or None,
+        }
+        key = (
+            item["name"].casefold(),
+            item["subject"].casefold() if item["subject"] else None,
+        )
+
+        if key in seen:
+            return
+
+        seen.add(key)
+        teachers.append(item)
+
+    # Struttura moderna Argo: griglia docentiClasse con celle nominativo/materie.
+    modern_rows = page.locator(
         'div.btl-listGrid[id*="docentiClasse"] '
         '.btl-grid-dataViewContainer tbody tr[rowid]'
     ).all()
-    for row in argo_rows:
-        name_locator = row.locator('span[id$=":nominativo"]').first
-        if name_locator.count() == 0:
+
+    logger.info(f"Trovate {len(modern_rows)} righe docenti nella griglia moderna")
+
+    for row in modern_rows:
+        try:
+            name = row.locator('span[id$=":nominativo"]').first.inner_text(timeout=2000)
+        except Exception:
             continue
 
-        name = " ".join(name_locator.inner_text().split())
-        subject_locator = row.locator('span[id$=":materie"]').first
-        subject = (
-            " ".join(subject_locator.inner_text().split())
-            if subject_locator.count() > 0
-            else ""
-        )
-        if not name:
+        subject = None
+        try:
+            subject = row.locator('span[id$=":materie"]').first.inner_text(timeout=1000)
+        except Exception:
+            subject = None
+
+        add_teacher(name, subject)
+
+    if teachers:
+        logger.info(f"Estratti {len(teachers)} docenti dalla griglia moderna")
+        return teachers
+
+    teacher_headers = (
+        "docente",
+        "professore",
+        "insegnante",
+        "nominativo",
+    )
+    subject_headers = (
+        "materia",
+        "materie",
+        "disciplina",
+        "insegnamento",
+    )
+
+    # Fallback: tabelle HTML tradizionali, accettate solo se le intestazioni
+    # identificano esplicitamente una tabella docenti.
+    tables = page.locator("table").all()
+    logger.info(f"Trovate {len(tables)} tabelle HTML per fallback docenti")
+
+    for table in tables:
+        try:
+            headers = [
+                _normalize_text(cell.inner_text()).casefold()
+                for cell in table.locator("thead th, tr:first-child th, tr:first-child td").all()
+            ]
+        except Exception:
             continue
 
-        key = (name.casefold(), subject.casefold())
-        if key in seen:
-            continue
-        seen.add(key)
-        teachers.append({"name": name, "subject": subject or None})
-
-    for table in page.locator("table, div.btl-table").all():
-        rows = table.locator("tr").all()
-        if not rows:
+        if not headers:
             continue
 
-        headers = [
-            cell.inner_text().strip().lower()
-            for cell in rows[0].locator("th, td").all()
-        ]
         teacher_index = next(
-            (i for i, value in enumerate(headers) if any(word in value for word in ("docente", "professore", "insegnante", "nominativo"))),
+            (
+                index
+                for index, header in enumerate(headers)
+                if any(token in header for token in teacher_headers)
+            ),
             None,
         )
         subject_index = next(
-            (i for i, value in enumerate(headers) if any(word in value for word in ("materia", "materie", "disciplina", "insegnamento"))),
+            (
+                index
+                for index, header in enumerate(headers)
+                if any(token in header for token in subject_headers)
+            ),
             None,
         )
 
-        # Ignora le altre tabelle della pagina (ad esempio le prenotazioni esistenti).
         if teacher_index is None:
             continue
 
+        rows = table.locator("tbody tr, tr").all()
         for row in rows[1:]:
             cells = row.locator("td").all()
-            if teacher_index >= len(cells):
+            if len(cells) <= teacher_index:
                 continue
-            name = " ".join(cells[teacher_index].inner_text().split())
-            subject = ""
-            if subject_index is not None and subject_index < len(cells):
-                subject = " ".join(cells[subject_index].inner_text().split())
-            if not name:
-                continue
-            key = (name.casefold(), subject.casefold())
-            if key in seen:
-                continue
-            seen.add(key)
-            teachers.append({"name": name, "subject": subject or None})
 
-    # Alcune versioni di Argo mostrano il docente in una select anziché in tabella.
-    if not teachers:
-        teacher_selects = page.locator(
-            'select[name*="docent" i], select[id*="docent" i], '
-            'select[aria-label*="docent" i], select[name*="professor" i]'
-        ).all()
-        for select in teacher_selects:
-            for option in select.locator("option").all():
-                name = " ".join(option.inner_text().split())
-                value = (option.get_attribute("value") or "").strip()
-                if not name or not value or "selezion" in name.casefold():
-                    continue
-                key = (name.casefold(), "")
-                if key in seen:
-                    continue
-                seen.add(key)
-                teachers.append({"name": name, "subject": None})
+            try:
+                name = cells[teacher_index].inner_text()
+                subject = (
+                    cells[subject_index].inner_text()
+                    if subject_index is not None and len(cells) > subject_index
+                    else None
+                )
+            except Exception:
+                continue
 
-    logger.info("Estratti %d docenti", len(teachers))
+            add_teacher(name, subject)
+
+        if teachers:
+            logger.info(f"Estratti {len(teachers)} docenti da tabella HTML")
+            return teachers
+
+    # Fallback estremo: select relative ai docenti.
+    select_locators = page.locator(
+        'select[name*="docent" i], select[id*="docent" i], '
+        'select[name*="insegn" i], select[id*="insegn" i], '
+        'select[name*="prof" i], select[id*="prof" i]'
+    ).all()
+
+    for select in select_locators:
+        for option in select.locator("option").all():
+            try:
+                value = _normalize_text(option.inner_text())
+            except Exception:
+                continue
+
+            lowered = value.casefold()
+            if not value or lowered in {"seleziona", "scegli", "tutti", "tutte"}:
+                continue
+
+            add_teacher(value)
+
+    logger.info(f"Estratti {len(teachers)} docenti totali")
     return teachers
 
 
-def _do_login(page: Page, codice_scuola: str, username: str, password: str) -> bool:
-    """
-    Effettua il login su portaleargo.it.
-    Restituisce True se il login è andato a buon fine.
-    """
+# ─────────────────────────────────────────────────────────────────────────────
+# Login
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _do_login(
+    page: Page,
+    codice_scuola: str,
+    username: str,
+    password: str,
+) -> bool:
+
     try:
+
         logger.info("Navigando alla pagina di login Argo...")
+
         page.goto(ARGO_BASE_URL)
-        page.wait_for_load_state("domcontentloaded", timeout=10000)
+
+        page.wait_for_load_state(
+            "domcontentloaded",
+            timeout=15000
+        )
 
         logger.info("Compilando il form di login...")
-        page.fill('input[name="famiglia_customer_code"]', codice_scuola)
-        page.fill('input[name="username"]', username)
-        page.fill('input[name="password"]', password)
-        page.click("button#accediBtn")
-        page.wait_for_load_state("domcontentloaded", timeout=8000)
-        page.wait_for_timeout(1500)
 
-        # Controlla se siamo ancora sulla pagina di login
+        page.fill(
+            'input[name="famiglia_customer_code"]',
+            codice_scuola
+        )
+
+        page.fill(
+            'input[name="username"]',
+            username
+        )
+
+        page.fill(
+            'input[name="password"]',
+            password
+        )
+
+        page.click("button#accediBtn")
+
+        page.wait_for_load_state(
+            "domcontentloaded",
+            timeout=15000
+        )
+
+        page.wait_for_timeout(3000)
+
         if page.url == ARGO_BASE_URL:
-            logger.error("Login fallito — URL invariato dopo il click")
+            logger.error("Login fallito")
             return False
 
-        if DEBUG_SCRAPER:
-            print("SCRAPER DEBUG:\nLogin successful")
         logger.info(f"Login OK — URL corrente: {page.url}")
+
         return True
 
     except Exception as e:
-        logger.error(f"Errore durante il login: {e}")
+
+        logger.error(f"Errore login: {e}")
+
         return False
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Navigazione promemoria
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _navigate_to_promemoria(page: Page) -> bool:
+    """Apre la pagina Promemoria della nuova SPA Argo.
+
+    Il nuovo portale usa un router hash-based e non espone più gli ID
+    ``btl-*`` del vecchio menu.
+    """
+    try:
+        _save_debug(page)
+        logger.info("Apertura pagina Promemoria Argo...")
+
+        selectors = [
+            'a[href="#/main/promemoria/"]',
+            'a[role="link"][href*="/main/promemoria"]',
+            'a:has-text("Promemoria")',
+        ]
+        if not _click_first_available(page, selectors, timeout=10000):
+            logger.error("Link Promemoria non trovato")
+            _save_debug(page)
+            return False
+
+        page.wait_for_timeout(1500)
+        try:
+            page.wait_for_url("**#/main/promemoria/**", timeout=10000)
+        except Exception:
+            # Alcune versioni della SPA aggiornano il contenuto senza far
+            # scattare l'attesa URL di Playwright.
+            pass
+
+        data_selectors = [
+            "table",
+            "[role=table]",
+            "tbody",
+            "text=Promemoria",
+        ]
+        if _wait_for_any_selector(page, data_selectors, timeout=10000):
+            _save_debug(page)
+            return True
+
+        logger.error("Dati Promemoria/verifiche non trovati")
+        _save_debug(page)
+        return False
+    except Exception as e:
+        logger.error(f"Errore apertura Promemoria: {e}")
+        _save_debug(page)
+        return False
+
+
+def _navigate_to_teachers(page: Page) -> bool:
+    try:
+        _save_debug(page)
+
+        logger.info("Apertura pagina Condivisione Argo per i docenti...")
+        teacher_selectors = [
+            'a[href="#/main/condivisione/"]',
+            'a[role="link"][href*="/main/condivisione"]',
+            'a:has-text("Condivisione")',
+        ]
+        if not _click_first_available(page, teacher_selectors, timeout=10000):
+            logger.error("Link Condivisione non trovato")
+            _save_debug(page)
+            return False
+
+        page.wait_for_timeout(1500)
+        try:
+            page.wait_for_url("**#/main/condivisione/**", timeout=10000)
+        except Exception:
+            pass
+
+        data_selectors = [
+            'div.btl-listGrid[id*="docentiClasse"]',
+            ".btl-grid-dataViewContainer",
+            'span[id$=":nominativo"]',
+            "table",
+            "[role=table]",
+            "div.btl-table",
+            'text=Condivisione',
+        ]
+
+        if _wait_for_any_selector(page, data_selectors, timeout=7000):
+            _save_debug(page)
+            return True
+
+        logger.error("Dati docenti non trovati")
+        _save_debug(page)
+        return False
+
+    except Exception as e:
+        logger.error(f"Errore navigazione docenti: {e}")
+        _save_debug(page)
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entry point pubblico
+# ─────────────────────────────────────────────────────────────────────────────
 
 def estrai_promemoria_con_credenziali(
     codice_scuola: str,
     username: str,
     password: str,
 ) -> list[dict]:
-    """
-    Lancia un browser Chromium headless, fa il login su portaleargo.it,
-    naviga alla sezione Promemoria e restituisce la lista degli elementi.
 
-    Args:
-        codice_scuola: Codice scuola Argo (es. "SS12345")
-        username: Username studente/famiglia
-        password: Password
-
-    Returns:
-        Lista di dict con chiavi: data, materia, descrizione
-        Lista vuota in caso di errore o nessun promemoria trovato.
-    """
     with sync_playwright() as p:
+
         browser: Browser = p.chromium.launch(
             headless=True,
             args=[
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--no-first-run",
-                "--no-zygote",
                 "--disable-gpu",
             ],
         )
-        context = browser.new_context(viewport={"width": 1280, "height": 720})
+
+        context = browser.new_context(
+            viewport={
+                "width": 1400,
+                "height": 900,
+            }
+        )
+
         page = context.new_page()
 
         try:
-            if not _do_login(page, codice_scuola, username, password):
+
+            ok = _do_login(
+                page,
+                codice_scuola,
+                username,
+                password,
+            )
+
+            if not ok:
                 return []
 
-            if not _navigate_to_promemoria(page):
+            ok = _navigate_to_promemoria(page)
+
+            if not ok:
                 return []
 
             return _parse_promemoria_table(page)
 
         except Exception as e:
-            logger.error(f"Errore generale nello scraper: {e}")
+
+            logger.error(
+                f"Errore generale scraper: {e}"
+            )
+
             return []
 
         finally:
+
             browser.close()
 
 
@@ -358,30 +493,70 @@ def estrai_docenti_con_credenziali(
     username: str,
     password: str,
 ) -> list[dict]:
-    """Accede ad Argo ed estrae i docenti della classe."""
+
     with sync_playwright() as p:
-        browser: Browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-accelerated-2d-canvas",
-                "--no-first-run",
-                "--no-zygote",
-                "--disable-gpu",
-            ],
-        )
-        context = browser.new_context(viewport={"width": 1280, "height": 720})
-        page = context.new_page()
+        browser: Browser | None = None
+        context = None
+        page = None
+
         try:
-            if not _do_login(page, codice_scuola, username, password):
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+
+            context = browser.new_context(
+                viewport={
+                    "width": 1400,
+                    "height": 900,
+                }
+            )
+
+            page = context.new_page()
+
+            ok = _do_login(
+                page,
+                codice_scuola,
+                username,
+                password,
+            )
+
+            if not ok:
                 return []
-            if not _navigate_to_teachers(page):
+
+            ok = _navigate_to_teachers(page)
+
+            if not ok:
                 return []
+
             return _parse_teachers_table(page)
-        except Exception as exc:
-            logger.error("Errore generale nello scraper docenti: %s", exc)
+
+        except Exception as e:
+            logger.error(f"Errore generale scraper docenti: {e}")
+            if page is not None:
+                _save_debug(page)
             return []
+
         finally:
-            browser.close()
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:
+                    pass
+
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception:
+                    pass
