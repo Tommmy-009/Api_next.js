@@ -511,6 +511,8 @@ def _navigate_to_teachers(page: Page) -> bool:
         page.wait_for_timeout(1000)
 
         data_selectors = [
+            'h1:has-text("Insegnanti della classe")',
+            'div.v-card .text-subtitle-1.font-weight-bold',
             'div.btl-listGrid[id*="docentiClasse"]',
             ".btl-grid-dataViewContainer",
             'span[id$=":nominativo"]',
@@ -520,7 +522,7 @@ def _navigate_to_teachers(page: Page) -> bool:
             'text=Condivisione',
         ]
 
-        if _wait_for_any_selector(page, data_selectors, timeout=7000):
+        if _wait_for_any_selector(page, data_selectors, timeout=5000):
             _save_debug(page)
             return True
 
