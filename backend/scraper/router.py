@@ -13,7 +13,11 @@ from jose import JWTError
 
 from database_pool import get_db, get_cursor
 from auth.jwt_handler import get_user_id_from_token
-from scraper.argo import estrai_docenti_con_credenziali, estrai_promemoria_con_credenziali
+from scraper.argo import (
+    estrai_docenti_con_credenziali,
+    estrai_promemoria_con_credenziali,
+    estrai_studente_con_credenziali,
+)
 from scraper.credentials_crypto import encrypt_argo_password, decrypt_argo_password
 from models.promemoria import ScrapeRequest, ScrapeResponse, PromemoriaItem
 from promemoria.router import invalidate_user_cache
@@ -25,6 +29,7 @@ from models.argo import (
     ArgoCredentialsUpsertResponse,
     ArgoTeacherItem,
     ArgoTeachersScrapeResponse,
+    ArgoStudentResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -249,6 +254,64 @@ def scrape_argo_teachers(
         result=teachers,
         count=len(teachers),
     )
+
+
+@router.post(
+    "/student",
+    response_model=ArgoStudentResponse,
+    summary="Scrape del nome studente e della scuola Argo",
+)
+def scrape_argo_student(
+    body: ScrapeRequest,
+    caller_user_id: str = Depends(_get_user_id),
+):
+    with get_db() as conn:
+        with get_cursor(conn) as cur:
+            cur.execute(
+                """
+                SELECT codice_scuola, username, password
+                FROM public.argo_credentials
+                WHERE user_id = %s
+                LIMIT 1
+                """,
+                (caller_user_id,),
+            )
+            cred = cur.fetchone()
+
+    if not cred:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credenziali Argo non trovate. Usa POST /argo/credentials per salvarle.",
+        )
+
+    future = _executor.submit(
+        estrai_studente_con_credenziali,
+        cred["codice_scuola"],
+        cred["username"],
+        decrypt_argo_password(cred["password"]),
+    )
+
+    try:
+        student: dict = future.result(timeout=settings.argo_scrape_timeout_seconds)
+    except TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Timeout durante lo scraping di Argo (>{settings.argo_scrape_timeout_seconds}s)",
+        )
+    except Exception:
+        logger.exception("Errore inatteso durante lo scraping studente Argo")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Servizio Argo temporaneamente non disponibile. Riprova tra poco.",
+        )
+
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Nome studente o scuola non trovati nel portale Argo.",
+        )
+
+    return ArgoStudentResponse(**student)
 
 
 @router.post(

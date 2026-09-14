@@ -38,3 +38,8 @@ class ArgoTeachersScrapeResponse(BaseModel):
     teachers: list[ArgoTeacherItem]
     result: list[ArgoTeacherItem]
     count: int
+
+
+class ArgoStudentResponse(BaseModel):
+    student_name: str
+    school_name: str

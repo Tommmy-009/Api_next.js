@@ -425,6 +425,21 @@ def _do_login(
         return False
 
 
+def _parse_student_page(page: Page) -> dict:
+    """Estrae nome studente e informazioni della scuola dall'intestazione Argo."""
+    school_name = _normalize_text(
+        page.locator("#customer-info-line-1").inner_text()
+    ).replace("(Villorba - TV)", "").strip()
+    student_name = _normalize_text(
+        page.locator("#customer-info-line-3").inner_text()
+    ).replace("(Alunno)", "").strip()
+
+    return {
+        "student_name": student_name,
+        "school_name": school_name,
+    }
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Navigazione promemoria
 # ─────────────────────────────────────────────────────────────────────────────
@@ -596,6 +611,39 @@ def estrai_promemoria_con_credenziali(
 
         finally:
 
+            browser.close()
+
+
+def estrai_studente_con_credenziali(
+    codice_scuola: str,
+    username: str,
+    password: str,
+) -> dict:
+    """Esegue il login ed estrae studente e scuola dall'intestazione Argo."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+            ],
+        )
+        page = browser.new_page(
+            viewport={"width": 1400, "height": 900}
+        )
+
+        try:
+            if not _do_login(page, codice_scuola, username, password):
+                return {}
+
+            return _parse_student_page(page)
+        except Exception as e:
+            logger.error(f"Errore generale scraper studente: {e}")
+            _save_debug(page)
+            return {}
+        finally:
             browser.close()
 
 
