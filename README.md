@@ -85,3 +85,14 @@ Altri endpoint: `GET/DELETE /argo/credentials`, `GET /argo/credentials/details` 
 - le risposte usano `401`, `404`, `422`, `503` e `504` per i casi previsti.
 
 La guida dettagliata è in [`BACKEND_INTEGRATION_GUIDE.md`](BACKEND_INTEGRATION_GUIDE.md).
+
+## AGGIUNTA A GITHUB
+- git add .
+  git commit -m "Descrizione delle modifiche"
+  git push
+
+## COPIA DA GITHUB A SERVER
+- git pull
+
+## AVVIO SENZA ERRORI
+- POSTGRES_PASSWORD='301278ETke!' docker compose up -d
