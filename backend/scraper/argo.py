@@ -92,19 +92,23 @@ def _parse_promemoria_table(page: Page) -> list[dict]:
 
     logger.info(f"Trovate {len(rows)} righe")
 
-    for row in rows[1:]:
+    for i, row in enumerate(rows[1:], start=2):
 
         cells = row.locator("td").all()
 
-        if len(cells) < 3:
+        logger.info(f"Riga {i}: trovate {len(cells)} celle")
+
+        if len(cells) < 4:
+            logger.warning(f"Riga {i} ignorata: meno di 4 celle")
             continue
 
         try:
-            data = cells[1].inner_text().strip()
             materia = cells[0].inner_text().strip()
+            data = cells[1].inner_text().strip()
             descrizione = cells[3].inner_text().strip()
 
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Errore nella riga {i}: {e}")
             continue
 
         # Filtri anti-rumore
