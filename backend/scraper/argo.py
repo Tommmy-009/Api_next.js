@@ -100,9 +100,9 @@ def _parse_promemoria_table(page: Page) -> list[dict]:
             continue
 
         try:
-            data = cells[0].inner_text().strip()
-            materia = cells[1].inner_text().strip()
-            descrizione = cells[2].inner_text().strip()
+            data = cells[1].inner_text().strip()
+            materia = cells[0].inner_text().strip()
+            descrizione = cells[3].inner_text().strip()
 
         except Exception:
             continue
