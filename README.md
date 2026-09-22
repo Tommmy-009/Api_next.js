@@ -95,4 +95,4 @@ La guida dettagliata è in [`BACKEND_INTEGRATION_GUIDE.md`](BACKEND_INTEGRATION_
 - git pull
 
 ## AVVIO SENZA ERRORI
-- POSTGRES_PASSWORD='301278ETke!' docker compose up -d
+- docker compose  --env-file backend/.env up -d
